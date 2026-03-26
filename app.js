@@ -11,6 +11,19 @@ function colorForCluster(clusterId) {
   return PALETTE[id % PALETTE.length];
 }
 
+function parseClusterId(raw) {
+  if (raw === null || raw === undefined) return null;
+  const id = Number(raw);
+  return Number.isFinite(id) ? id : null;
+}
+
+function parseLevel(raw) {
+  if (raw === null || raw === undefined) return null;
+  const level = Number(raw);
+  if (!Number.isFinite(level)) return null;
+  return Math.trunc(level);
+}
+
 function normalizeLabel(label) {
   if (label === null || label === undefined) return '(empty)';
   const text = String(label).trim();
@@ -49,6 +62,10 @@ function zoomedRange(min, max, factor = 0.5) {
 async function draw() {
   const meta = document.getElementById('meta');
   const errorBox = document.getElementById('error');
+  const nsynthL1Toggle = document.getElementById('toggle-nsynth-l1');
+  const nsynthL2Toggle = document.getElementById('toggle-nsynth-l2');
+  const nsynthL3Toggle = document.getElementById('toggle-nsynth-l3');
+  const repsToggle = document.getElementById('toggle-reps');
 
   try {
     const res = await fetch('text_label_distribution.json');
@@ -62,17 +79,49 @@ async function draw() {
     }
 
     const grouped = new Map();
+    const nsynthLevels = new Map([
+      [1, { x: [], y: [], labels: [] }],
+      [2, { x: [], y: [], labels: [] }],
+      [3, { x: [], y: [], labels: [] }]
+    ]);
+    let nsynthUnknownLevelHidden = 0;
+    let simapNoiseHidden = 0;
+
     for (const point of points) {
-      const cluster = Number(point.cluster);
-      const key = Number.isFinite(cluster) ? cluster : -1;
-      if (key === -1) continue;
-      if (!grouped.has(key)) {
-        grouped.set(key, { x: [], y: [], labels: [] });
+      const x = Number(point.x);
+      const y = Number(point.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      const sourceRaw = point && point.source !== undefined ? String(point.source) : 'simap';
+      const source = sourceRaw.toLowerCase();
+      const label = normalizeLabel(point.label);
+
+      if (source.includes('nsynth')) {
+        const level = parseLevel(point.level);
+        const bucket = nsynthLevels.get(level);
+        if (!bucket) {
+          nsynthUnknownLevelHidden++;
+          continue;
+        }
+        bucket.x.push(x);
+        bucket.y.push(y);
+        bucket.labels.push(label);
+        continue;
       }
-      const bucket = grouped.get(key);
-      bucket.x.push(Number(point.x));
-      bucket.y.push(Number(point.y));
-      bucket.labels.push(normalizeLabel(point.label));
+
+      const cluster = parseClusterId(point.cluster);
+      if (cluster === null || cluster === -1) {
+        simapNoiseHidden++;
+        continue;
+      }
+
+      if (!grouped.has(cluster)) {
+        grouped.set(cluster, { x: [], y: [], labels: [] });
+      }
+      const bucket = grouped.get(cluster);
+      bucket.x.push(x);
+      bucket.y.push(y);
+      bucket.labels.push(label);
     }
 
     const sortedClusters = Array.from(grouped.keys()).sort((a, b) => {
@@ -99,12 +148,53 @@ async function draw() {
           color: isNoise ? '#7f8c8d' : colorForCluster(clusterId)
         },
         hovertemplate:
+          'source: simap<br>' +
           'cluster: %{customdata}<br>' +
           'label: %{text}<br>' +
           'x: %{x:.4f}<br>' +
           'y: %{y:.4f}<extra></extra>'
       };
     });
+
+    const nsynthTraceNames = new Map([
+      [1, 'NSynth-777 (level 1)'],
+      [2, 'NSynth-777 (level 2)'],
+      [3, 'NSynth-777 (level 3)']
+    ]);
+
+    const nsynthLevelStyles = new Map([
+      [1, { color: '#111827', size: 10 }],
+      [2, { color: '#2563eb', size: 11 }],
+      [3, { color: '#7c3aed', size: 12 }]
+    ]);
+
+    for (const level of [1, 2, 3]) {
+      const bucket = nsynthLevels.get(level);
+      const name = nsynthTraceNames.get(level);
+      const style = nsynthLevelStyles.get(level);
+      traces.push({
+        type: 'scattergl',
+        mode: 'markers',
+        name,
+        x: bucket.x,
+        y: bucket.y,
+        text: bucket.labels,
+        customdata: Array(bucket.x.length).fill(level),
+        marker: {
+          symbol: 'x',
+          size: style.size,
+          color: style.color,
+          opacity: 1,
+          line: { width: 1 }
+        },
+        visible: false,
+        hovertemplate:
+          'source: NSynth-777 level %{customdata}<br>' +
+          'label: %{text}<br>' +
+          'x: %{x:.4f}<br>' +
+          'y: %{y:.4f}<extra></extra>'
+      });
+    }
 
     const representatives = [];
 
@@ -144,8 +234,18 @@ async function draw() {
     }
 
     const plottedCount = sortedClusters.reduce((sum, id) => sum + grouped.get(id).x.length, 0);
-    const noiseCount = points.length - plottedCount;
-    meta.textContent = `${plottedCount.toLocaleString()} plotted points | ${sortedClusters.length} clusters | ${noiseCount.toLocaleString()} noise points hidden`;
+    const nsynthL1Count = nsynthLevels.get(1).x.length;
+    const nsynthL2Count = nsynthLevels.get(2).x.length;
+    const nsynthL3Count = nsynthLevels.get(3).x.length;
+    meta.textContent =
+      `${plottedCount.toLocaleString()} SIMAP plotted points | ` +
+      `${sortedClusters.length} clusters | ` +
+      `${simapNoiseHidden.toLocaleString()} SIMAP noise points hidden | ` +
+      `NSynth-777: ` +
+      `L1 ${nsynthL1Count.toLocaleString()}, ` +
+      `L2 ${nsynthL2Count.toLocaleString()}, ` +
+      `L3 ${nsynthL3Count.toLocaleString()} (toggle to show)` +
+      (nsynthUnknownLevelHidden ? ` | ${nsynthUnknownLevelHidden.toLocaleString()} NSynth points with unknown level hidden` : '');
 
     let xMin = Number.POSITIVE_INFINITY;
     let xMax = Number.NEGATIVE_INFINITY;
@@ -204,6 +304,82 @@ async function draw() {
     const baseSize = 7;
     let highlightedTraceIndex = -1;
 
+    let showRepresentativeLabels = true;
+    if (repsToggle) {
+      const updateToggleLabel = (isVisible) => {
+        repsToggle.textContent = isVisible ? 'Hide SIMAP cluster representatives' : 'Show SIMAP cluster representatives';
+        repsToggle.setAttribute('aria-pressed', isVisible ? 'true' : 'false');
+      };
+
+      updateToggleLabel(true);
+
+      repsToggle.addEventListener('click', () => {
+        showRepresentativeLabels = !showRepresentativeLabels;
+        updateToggleLabel(showRepresentativeLabels);
+
+        if (showRepresentativeLabels) {
+          applyRepresentativeAnnotations();
+          return;
+        }
+
+        isApplyingAnnotations = true;
+        Plotly.relayout(plotEl, { annotations: [] })
+          .then(() => { isApplyingAnnotations = false; })
+          .catch(() => { isApplyingAnnotations = false; });
+      });
+    }
+
+    const nsynthButtonsByLevel = new Map([
+      [1, nsynthL1Toggle],
+      [2, nsynthL2Toggle],
+      [3, nsynthL3Toggle]
+    ]);
+
+    const nsynthLevelDescriptions = new Map([
+      [1, 'Family'],
+      [2, 'Family+Source'],
+      [3, 'Family+Source+Quality']
+    ]);
+
+    const nsynthButtonLabel = (level) => {
+      const desc = nsynthLevelDescriptions.get(level);
+      return desc ? `NSynth-777 level ${level}: ${desc}` : `NSynth-777 level ${level}`;
+    };
+
+    const findNsynthTraceIndex = (level) => {
+      const name = nsynthTraceNames.get(level);
+      if (!name) return -1;
+      return plotEl.data.findIndex((t) => t && t.name === name);
+    };
+
+    const setupNsynthToggle = (level) => {
+      const btn = nsynthButtonsByLevel.get(level);
+      if (!btn) return;
+
+      const updateToggleLabel = (isVisible) => {
+        const base = nsynthButtonLabel(level);
+        btn.textContent = isVisible ? `Hide ${base}` : `Show ${base}`;
+        btn.setAttribute('aria-pressed', isVisible ? 'true' : 'false');
+      };
+
+      updateToggleLabel(false);
+      btn.disabled = nsynthLevels.get(level).x.length === 0;
+
+      btn.addEventListener('click', () => {
+        const idx = findNsynthTraceIndex(level);
+        if (idx === -1) return;
+        const trace = plotEl.data && plotEl.data[idx];
+        const currentlyVisible = trace && trace.visible !== false;
+        const nextVisible = !currentlyVisible;
+        updateToggleLabel(nextVisible);
+        Plotly.restyle(plotEl, { visible: nextVisible }, [idx]);
+      });
+    };
+
+    setupNsynthToggle(1);
+    setupNsynthToggle(2);
+    setupNsynthToggle(3);
+
     function resetTrace(traceIndex) {
       if (traceIndex < 0 || traceIndex >= markerTraceCount) return;
       Plotly.restyle(
@@ -250,6 +426,7 @@ async function draw() {
 
     let isApplyingAnnotations = false;
     function applyRepresentativeAnnotations() {
+      if (!showRepresentativeLabels) return;
       const fullLayout = plotEl._fullLayout;
       if (!fullLayout || !fullLayout.xaxis || !fullLayout.yaxis) return;
 
@@ -353,7 +530,7 @@ async function draw() {
     }
 
     plotEl.on('plotly_relayout', () => {
-      if (isApplyingAnnotations) return;
+      if (isApplyingAnnotations || !showRepresentativeLabels) return;
       applyRepresentativeAnnotations();
     });
 
