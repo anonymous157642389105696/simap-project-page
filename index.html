@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SIMAP Dataset</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=9" />
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=9" defer></script>
 </head>
 <body>
   <main class="container">
@@ -14,9 +14,9 @@
     <div class="meta" id="meta">Loading data...</div>
     <div class="controls">
       <button id="toggle-reps" type="button">Hide SIMAP cluster representatives</button>
-      <button id="toggle-nsynth-l1" type="button">Show NSynth-777 level 1: Family</button>
-      <button id="toggle-nsynth-l2" type="button">Show NSynth-777 level 2: Family+Source</button>
-      <button id="toggle-nsynth-l3" type="button">Show NSynth-777 level 3: Family+Source+Quality</button>
+      <button id="toggle-nsynth-l1" type="button">Show NSynth-777: Family</button>
+      <button id="toggle-nsynth-l2" type="button">Show NSynth-777: Source+Family</button>
+      <button id="toggle-nsynth-l3" type="button">Show NSynth-777: Quality+Family</button>
     </div>
     <div id="plot"></div>
     <div class="error" id="error"></div>

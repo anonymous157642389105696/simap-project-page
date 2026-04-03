@@ -17,11 +17,25 @@ function parseClusterId(raw) {
   return Number.isFinite(id) ? id : null;
 }
 
-function parseLevel(raw) {
+function normalizeNsynthType(raw) {
   if (raw === null || raw === undefined) return null;
-  const level = Number(raw);
-  if (!Number.isFinite(level)) return null;
-  return Math.trunc(level);
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const asInt = Math.trunc(raw);
+    if (asInt === 1) return 'family';
+    if (asInt === 2) return 'source_family';
+    if (asInt === 3) return 'quality_family';
+    return null;
+  }
+
+  const text = String(raw).trim().toLowerCase();
+  if (!text) return null;
+  const normalized = text.replace(/\s*\+\s*/g, '+').replace(/\s+/g, ' ');
+
+  if (normalized === 'family') return 'family';
+  if (normalized === 'source+family') return 'source_family';
+  if (normalized === 'quality+family') return 'quality_family';
+  return null;
 }
 
 function normalizeLabel(label) {
@@ -67,6 +81,13 @@ async function draw() {
   const nsynthL3Toggle = document.getElementById('toggle-nsynth-l3');
   const repsToggle = document.getElementById('toggle-reps');
 
+  const nsynthTypeSpecs = [
+    { key: 'family', display: 'Family', button: nsynthL1Toggle, style: { color: '#111827', size: 10 } },
+    { key: 'source_family', display: 'Source+Family', button: nsynthL2Toggle, style: { color: '#2563eb', size: 11 } },
+    { key: 'quality_family', display: 'Quality+Family', button: nsynthL3Toggle, style: { color: '#7c3aed', size: 12 } }
+  ];
+  const nsynthTraceName = (spec) => `NSynth-777: ${spec.display}`;
+
   try {
     const res = await fetch('text_label_distribution.json');
     if (!res.ok) {
@@ -79,12 +100,8 @@ async function draw() {
     }
 
     const grouped = new Map();
-    const nsynthLevels = new Map([
-      [1, { x: [], y: [], labels: [] }],
-      [2, { x: [], y: [], labels: [] }],
-      [3, { x: [], y: [], labels: [] }]
-    ]);
-    let nsynthUnknownLevelHidden = 0;
+    const nsynthBuckets = new Map(nsynthTypeSpecs.map((spec) => [spec.key, { x: [], y: [], labels: [] }]));
+    let nsynthUnknownTypeHidden = 0;
     let simapNoiseHidden = 0;
 
     for (const point of points) {
@@ -97,10 +114,10 @@ async function draw() {
       const label = normalizeLabel(point.label);
 
       if (source.includes('nsynth')) {
-        const level = parseLevel(point.level);
-        const bucket = nsynthLevels.get(level);
+        const typeKey = normalizeNsynthType(point.type);
+        const bucket = typeKey ? nsynthBuckets.get(typeKey) : null;
         if (!bucket) {
-          nsynthUnknownLevelHidden++;
+          nsynthUnknownTypeHidden++;
           continue;
         }
         bucket.x.push(x);
@@ -156,22 +173,10 @@ async function draw() {
       };
     });
 
-    const nsynthTraceNames = new Map([
-      [1, 'NSynth-777 (level 1)'],
-      [2, 'NSynth-777 (level 2)'],
-      [3, 'NSynth-777 (level 3)']
-    ]);
-
-    const nsynthLevelStyles = new Map([
-      [1, { color: '#111827', size: 10 }],
-      [2, { color: '#2563eb', size: 11 }],
-      [3, { color: '#7c3aed', size: 12 }]
-    ]);
-
-    for (const level of [1, 2, 3]) {
-      const bucket = nsynthLevels.get(level);
-      const name = nsynthTraceNames.get(level);
-      const style = nsynthLevelStyles.get(level);
+    for (const spec of nsynthTypeSpecs) {
+      const bucket = nsynthBuckets.get(spec.key);
+      const name = nsynthTraceName(spec);
+      const style = spec.style;
       traces.push({
         type: 'scattergl',
         mode: 'markers',
@@ -179,7 +184,7 @@ async function draw() {
         x: bucket.x,
         y: bucket.y,
         text: bucket.labels,
-        customdata: Array(bucket.x.length).fill(level),
+        customdata: Array(bucket.x.length).fill(spec.display),
         marker: {
           symbol: 'x',
           size: style.size,
@@ -189,7 +194,8 @@ async function draw() {
         },
         visible: false,
         hovertemplate:
-          'source: NSynth-777 level %{customdata}<br>' +
+          'source: NSynth-777<br>' +
+          'type: %{customdata}<br>' +
           'label: %{text}<br>' +
           'x: %{x:.4f}<br>' +
           'y: %{y:.4f}<extra></extra>'
@@ -234,18 +240,18 @@ async function draw() {
     }
 
     const plottedCount = sortedClusters.reduce((sum, id) => sum + grouped.get(id).x.length, 0);
-    const nsynthL1Count = nsynthLevels.get(1).x.length;
-    const nsynthL2Count = nsynthLevels.get(2).x.length;
-    const nsynthL3Count = nsynthLevels.get(3).x.length;
-    meta.textContent =
-      `${plottedCount.toLocaleString()} SIMAP plotted points | ` +
+    const nsynthFamilyCount = nsynthBuckets.get('family').x.length;
+    const nsynthSourceFamilyCount = nsynthBuckets.get('source_family').x.length;
+    const nsynthQualityFamilyCount = nsynthBuckets.get('quality_family').x.length;
+    meta.innerHTML =
+      `SIMAP: ${plottedCount.toLocaleString()} plotted points | ` +
       `${sortedClusters.length} clusters | ` +
-      `${simapNoiseHidden.toLocaleString()} SIMAP noise points hidden | ` +
+      `${simapNoiseHidden.toLocaleString()} noise points hidden<br>` +
       `NSynth-777: ` +
-      `L1 ${nsynthL1Count.toLocaleString()}, ` +
-      `L2 ${nsynthL2Count.toLocaleString()}, ` +
-      `L3 ${nsynthL3Count.toLocaleString()} (toggle to show)` +
-      (nsynthUnknownLevelHidden ? ` | ${nsynthUnknownLevelHidden.toLocaleString()} NSynth points with unknown level hidden` : '');
+      `${nsynthFamilyCount.toLocaleString()} Family points, ` +
+      `${nsynthSourceFamilyCount.toLocaleString()} Source+Family points, ` +
+      `${nsynthQualityFamilyCount.toLocaleString()} Quality+Family points (toggle to show)` +
+      (nsynthUnknownTypeHidden ? ` | ${nsynthUnknownTypeHidden.toLocaleString()} NSynth points with unknown type hidden` : '');
 
     let xMin = Number.POSITIVE_INFINITY;
     let xMax = Number.NEGATIVE_INFINITY;
@@ -329,44 +335,28 @@ async function draw() {
       });
     }
 
-    const nsynthButtonsByLevel = new Map([
-      [1, nsynthL1Toggle],
-      [2, nsynthL2Toggle],
-      [3, nsynthL3Toggle]
-    ]);
-
-    const nsynthLevelDescriptions = new Map([
-      [1, 'Family'],
-      [2, 'Family+Source'],
-      [3, 'Family+Source+Quality']
-    ]);
-
-    const nsynthButtonLabel = (level) => {
-      const desc = nsynthLevelDescriptions.get(level);
-      return desc ? `NSynth-777 level ${level}: ${desc}` : `NSynth-777 level ${level}`;
+    const findNsynthTraceIndex = (traceName) => {
+      if (!traceName) return -1;
+      return plotEl.data.findIndex((t) => t && t.name === traceName);
     };
 
-    const findNsynthTraceIndex = (level) => {
-      const name = nsynthTraceNames.get(level);
-      if (!name) return -1;
-      return plotEl.data.findIndex((t) => t && t.name === name);
-    };
-
-    const setupNsynthToggle = (level) => {
-      const btn = nsynthButtonsByLevel.get(level);
+    const setupNsynthToggle = (spec) => {
+      const btn = spec.button;
       if (!btn) return;
 
+      const traceName = nsynthTraceName(spec);
+      const bucket = nsynthBuckets.get(spec.key);
+
       const updateToggleLabel = (isVisible) => {
-        const base = nsynthButtonLabel(level);
-        btn.textContent = isVisible ? `Hide ${base}` : `Show ${base}`;
+        btn.textContent = isVisible ? `Hide ${traceName}` : `Show ${traceName}`;
         btn.setAttribute('aria-pressed', isVisible ? 'true' : 'false');
       };
 
       updateToggleLabel(false);
-      btn.disabled = nsynthLevels.get(level).x.length === 0;
+      btn.disabled = bucket.x.length === 0;
 
       btn.addEventListener('click', () => {
-        const idx = findNsynthTraceIndex(level);
+        const idx = findNsynthTraceIndex(traceName);
         if (idx === -1) return;
         const trace = plotEl.data && plotEl.data[idx];
         const currentlyVisible = trace && trace.visible !== false;
@@ -376,9 +366,9 @@ async function draw() {
       });
     };
 
-    setupNsynthToggle(1);
-    setupNsynthToggle(2);
-    setupNsynthToggle(3);
+    for (const spec of nsynthTypeSpecs) {
+      setupNsynthToggle(spec);
+    }
 
     function resetTrace(traceIndex) {
       if (traceIndex < 0 || traceIndex >= markerTraceCount) return;
