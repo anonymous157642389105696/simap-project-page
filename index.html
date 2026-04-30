@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SIMAP Dataset</title>
-  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <script src="app.js?v=9" defer></script>
+  <script src="app.js?v=10" defer></script>
 </head>
 <body>
   <main class="container">
@@ -18,6 +18,12 @@
       <button id="toggle-nsynth-l2" type="button">Show NSynth-777: Source+Family</button>
       <button id="toggle-nsynth-l3" type="button">Show NSynth-777: Quality+Family</button>
     </div>
+    <section class="audio-panel" aria-label="Cluster representative audio">
+      <div class="audio-info">
+        <div class="audio-label" id="audio-label">Select a representative marker to listen.</div>
+      </div>
+      <audio id="cluster-audio" controls preload="none"></audio>
+    </section>
     <div id="plot"></div>
     <div class="error" id="error"></div>
   </main>

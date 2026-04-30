@@ -80,6 +80,8 @@ async function draw() {
   const nsynthL2Toggle = document.getElementById('toggle-nsynth-l2');
   const nsynthL3Toggle = document.getElementById('toggle-nsynth-l3');
   const repsToggle = document.getElementById('toggle-reps');
+  const audioLabel = document.getElementById('audio-label');
+  const clusterAudio = document.getElementById('cluster-audio');
 
   const nsynthTypeSpecs = [
     { key: 'family', display: 'Family', button: nsynthL1Toggle, style: { color: '#111827', size: 10 } },
@@ -133,12 +135,15 @@ async function draw() {
       }
 
       if (!grouped.has(cluster)) {
-        grouped.set(cluster, { x: [], y: [], labels: [] });
+        grouped.set(cluster, { x: [], y: [], labels: [], representative: null });
       }
       const bucket = grouped.get(cluster);
       bucket.x.push(x);
       bucket.y.push(y);
       bucket.labels.push(label);
+      if (point.representative === true) {
+        bucket.representative = { x, y, label };
+      }
     }
 
     const sortedClusters = Array.from(grouped.keys()).sort((a, b) => {
@@ -206,38 +211,45 @@ async function draw() {
 
     for (const clusterId of sortedClusters) {
       const group = grouped.get(clusterId);
-      if (!group || group.x.length === 0) continue;
-
-      let cx = 0;
-      let cy = 0;
-      for (let i = 0; i < group.x.length; i++) {
-        cx += group.x[i];
-        cy += group.y[i];
-      }
-      cx /= group.x.length;
-      cy /= group.y.length;
-
-      let bestIdx = 0;
-      let bestDist = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < group.x.length; i++) {
-        const dx = group.x[i] - cx;
-        const dy = group.y[i] - cy;
-        const dist2 = dx * dx + dy * dy;
-        if (dist2 < bestDist) {
-          bestDist = dist2;
-          bestIdx = i;
-        }
-      }
+      if (!group || !group.representative) continue;
 
       representatives.push({
         clusterId,
-        x: group.x[bestIdx],
-        y: group.y[bestIdx],
-        label: group.labels[bestIdx],
+        x: group.representative.x,
+        y: group.representative.y,
+        label: group.representative.label,
         color: colorForCluster(clusterId),
         size: group.x.length
       });
     }
+
+    const representativeTraceIndex = traces.length;
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      name: 'SIMAP representative audio',
+      x: representatives.map((rep) => rep.x),
+      y: representatives.map((rep) => rep.y),
+      text: representatives.map((rep) => rep.label),
+      customdata: representatives.map((rep) => [
+        rep.clusterId,
+        `audio_examples/${rep.clusterId}.wav`
+      ]),
+      marker: {
+        symbol: 'diamond-open',
+        size: 11,
+        color: representatives.map((rep) => rep.color),
+        line: {
+          width: 2,
+          color: '#111827'
+        }
+      },
+      hovertemplate:
+        'source: simap<br>' +
+        'cluster: %{customdata[0]}<br>' +
+        'representative label: %{text}<br>' +
+        'click to play audio<extra></extra>'
+    });
 
     const plottedCount = sortedClusters.reduce((sum, id) => sum + grouped.get(id).x.length, 0);
     const nsynthFamilyCount = nsynthBuckets.get('family').x.length;
@@ -400,6 +412,61 @@ async function draw() {
       );
       highlightedTraceIndex = traceIndex;
     }
+
+    plotEl.on('plotly_click', (evt) => {
+      const pt = evt && evt.points && evt.points[0];
+      if (!pt || pt.curveNumber !== representativeTraceIndex) return;
+
+      const clusterId = pt.customdata && pt.customdata[0];
+      const audioSrc = pt.customdata && pt.customdata[1];
+      const label = normalizeLabel(pt.text);
+      if (!audioSrc || !clusterAudio) return;
+
+      if (audioLabel) {
+        audioLabel.textContent = label;
+      }
+
+      clusterAudio.src = audioSrc;
+      clusterAudio.load();
+      const playPromise = clusterAudio.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {
+          if (audioLabel) {
+            audioLabel.textContent = `${label} (press play to listen)`;
+          }
+        });
+      }
+    });
+
+    plotEl.addEventListener('click', (event) => {
+      const textNode = event.target && event.target.closest
+        ? event.target.closest('.annotation-text')
+        : null;
+      if (!textNode) return;
+
+      const labelText = textNode.textContent || '';
+      const match = labelText.match(/^C(-?\d+):/);
+      if (!match) return;
+
+      const clusterId = Number(match[1]);
+      const rep = representatives.find((candidate) => candidate.clusterId === clusterId);
+      if (!rep || !clusterAudio) return;
+
+      if (audioLabel) {
+        audioLabel.textContent = rep.label;
+      }
+
+      clusterAudio.src = `audio_examples/${rep.clusterId}.wav`;
+      clusterAudio.load();
+      const playPromise = clusterAudio.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {
+          if (audioLabel) {
+            audioLabel.textContent = `${rep.label} (press play to listen)`;
+          }
+        });
+      }
+    });
 
     plotEl.on('plotly_hover', (evt) => {
       const pt = evt && evt.points && evt.points[0];
